@@ -16,7 +16,16 @@ exports.submitActivity = async (req, res) => {
       });
     }
 
-    const { activityType, title, description, date } = req.body;
+    const { activityType, title, description, date, eventOrganizer, level } = req.body;
+
+    // Get the student's class and department
+    const student = await User.findById(req.user._id);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
 
     // Create activity
     const activity = await Activity.create({
@@ -25,14 +34,37 @@ exports.submitActivity = async (req, res) => {
       title,
       description,
       date,
-      certificateFile: req.file.path
+      eventOrganizer: eventOrganizer || 'Not specified',
+      level: level || 1,
+      certificateFile: req.file.path,
+      // Include student's class and department for easier filtering
+      studentClass: student.class,
+      studentDepartment: student.department
     });
+
+    // Find teachers for this student's class and department
+    const teachers = await User.find({
+      role: 'teacher',
+      department: student.department,
+      class: student.class
+    });
+
+    const teacherCount = teachers.length;
 
     res.status(201).json({
       success: true,
-      data: activity
+      data: activity,
+      teacherCount,
+      message: `Activity submitted successfully! Your certificate will be reviewed by your teacher${teacherCount > 0 ? '' : ' (Note: No teacher is currently assigned to your class)'}.`
     });
   } catch (error) {
+    // If there was an error and a file was uploaded, delete it
+    if (req.file) {
+      fs.unlink(req.file.path, (err) => {
+        if (err) console.error('Error deleting file:', err);
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Server Error',
@@ -69,10 +101,18 @@ exports.getMyActivities = async (req, res) => {
 exports.getPendingActivities = async (req, res) => {
   try {
     // Find students in the teacher's class/department
-    const students = await User.find({ 
+    const teacherQuery = { 
       role: 'student',
       department: req.user.department
-    }).select('_id');
+    };
+    
+    // If teacher has a class assigned, filter by that class too
+    if (req.user.class) {
+      teacherQuery.class = req.user.class;
+    }
+    
+    const students = await User.find(teacherQuery)
+      .select('_id name email rollNumber class semester department');
 
     const studentIds = students.map(student => student._id);
 
@@ -80,12 +120,28 @@ exports.getPendingActivities = async (req, res) => {
     const activities = await Activity.find({
       student: { $in: studentIds },
       status: 'pending'
-    }).populate('student', 'name email rollNumber class semester')
+    }).populate('student', 'name email rollNumber class semester department')
       .sort({ createdAt: -1 });
+
+    // Count activities by status for statistics
+    const approvedCount = await Activity.countDocuments({
+      student: { $in: studentIds },
+      status: 'approved'
+    });
+
+    const rejectedCount = await Activity.countDocuments({
+      student: { $in: studentIds },
+      status: 'rejected'
+    });
 
     res.status(200).json({
       success: true,
       count: activities.length,
+      stats: {
+        pending: activities.length,
+        approved: approvedCount,
+        rejected: rejectedCount
+      },
       data: activities
     });
   } catch (error) {

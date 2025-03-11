@@ -26,6 +26,16 @@ const ActivitySchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  eventOrganizer: {
+    type: String,
+    default: 'Not specified'
+  },
+  level: {
+    type: Number,
+    min: 1,
+    max: 5,
+    default: 1
+  },
   date: {
     type: Date,
     required: true
@@ -33,6 +43,13 @@ const ActivitySchema = new mongoose.Schema({
   certificateFile: {
     type: String,  // Path to the uploaded certificate file
     required: true
+  },
+  // Additional fields for easier filtering
+  studentClass: {
+    type: String
+  },
+  studentDepartment: {
+    type: String
   },
   pointsAwarded: {
     type: Number,
